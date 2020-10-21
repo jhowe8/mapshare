@@ -77,17 +77,19 @@ class _LoginPageState extends State<LoginPage> {
     return Scaffold(
       body: new Stack(
         children: <Widget> [
+          /*
           new Container(
             width: MediaQuery.of(context).size.width,
             height: MediaQuery.of(context).size.height,
             decoration: new BoxDecoration(
                 image: new DecorationImage(
                     colorFilter: new ColorFilter.mode(Colors.black.withOpacity(0.25), BlendMode.darken),
-                    image: new AssetImage('assets/images/swiss_alps.png'),
+                    image: new AssetImage('assets/images/MSLogin.png'),
                     fit: getPhoneRotation()
                 )
             ),
           ),
+          */
           new ListView(
             children: <Widget>[
               new Container(
@@ -116,10 +118,10 @@ class _LoginPageState extends State<LoginPage> {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: <Widget> [
-            AutoSizeText('HoweCrafty', group: titleGroup, style: TextStyle(fontFamily: 'Helvetica',
+            AutoSizeText('Map', group: titleGroup, style: TextStyle(fontFamily: 'Helvetica',
             fontWeight: FontWeight.bold, fontSize: 60.0, color: Colors.white), maxFontSize: 70.0, maxLines: 1),
-            AutoSizeText('Wreaths', group: titleGroup, style: TextStyle(fontFamily: 'Helvetica',
-                fontWeight: FontWeight.bold, fontSize: 60.0, color: Colors.purpleAccent[100]), maxFontSize: 70.0, maxLines: 1),
+            AutoSizeText('Share', group: titleGroup, style: TextStyle(fontFamily: 'Helvetica',
+                fontWeight: FontWeight.bold, fontSize: 60.0, color: Color.fromRGBO(238, 108, 77, 1)), maxFontSize: 70.0, maxLines: 1),
           ]
         )
       ),
@@ -132,12 +134,15 @@ class _LoginPageState extends State<LoginPage> {
                 fontFamily: 'Helvetica',
                 fontWeight: FontWeight.bold),
             children: <TextSpan>[
-              TextSpan(text: 'Manage your ',
+              TextSpan(text: 'Share ',
+                  style: new TextStyle(
+                      color: Color.fromRGBO(238, 108, 77, 1))),
+              TextSpan(text: 'your ',
                   style: new TextStyle(
                       color: Colors.white)),
-              TextSpan(text: 'wreaths',
+              TextSpan(text: 'maps',
                   style: new TextStyle(
-                      color: Colors.purpleAccent[100])),
+                      color: Color.fromRGBO(238, 108, 77, 1))),
               TextSpan(text: ' with ease.',
                   style: new TextStyle(
                       color: Colors.white))
@@ -155,7 +160,7 @@ class _LoginPageState extends State<LoginPage> {
       new TextFormField(
           decoration: new InputDecoration(labelText: 'Username (email)'),
           validator: (value) => value.isEmpty ? 'Email can\'t be empty' : null,
-          onSaved:(value) => _email = value
+          onSaved:(value) => _email = value,
       ),
       new TextFormField(
           obscureText: true,
@@ -172,6 +177,7 @@ class _LoginPageState extends State<LoginPage> {
         new Opacity(
           opacity: 0.75,
           child: new RaisedButton(
+            color: Color.fromRGBO(152, 193, 217, 1),
             child: new Text('Login', style: new TextStyle(fontSize: 20.0, color: Colors.white)),
             onPressed: validateAndSubmit,
           ),
@@ -196,7 +202,7 @@ class _LoginPageState extends State<LoginPage> {
         new Opacity(
           opacity: 0.75,
           child: new RaisedButton(
-            color: Colors.purpleAccent[100],
+            color: Color.fromRGBO(238, 108, 77, 1),
             child: new Text('Register', style: new TextStyle(fontSize: 20.0, color: Colors.white)),
             onPressed: validateAndSubmit,
           ),

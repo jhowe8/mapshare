@@ -12,10 +12,10 @@ class MyApp extends StatelessWidget {
         title: 'Howe Crafty',
         theme: ThemeData(
             brightness: Brightness.dark,
-            primaryColor: Colors.purple[800],
-            accentColor: Colors.purpleAccent[100],
+            primaryColor: Color.fromRGBO(61, 90, 128, 1),
+            backgroundColor: Color.fromRGBO(41, 50, 65, 1),
+            accentColor: Color.fromRGBO(238, 108, 77, 1),
 
-            primarySwatch: Colors.purple,
             buttonTheme: ButtonThemeData(textTheme: ButtonTextTheme.accent),
 
             fontFamily: 'Helvetica',

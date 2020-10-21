@@ -1,5 +1,5 @@
 import 'package:flutter/material.dart';
-import 'package:map_share/listed_wreaths_page.dart';
+import 'package:mapshare/map_page.dart';
 import 'login_page.dart';
 import 'auth.dart';
 
@@ -52,7 +52,7 @@ class _RootPageState extends State<RootPage> {
           onSignedIn: _signedIn,
         );
       case AuthStatus.signedIn:
-        return new ListedWreathsPage(
+        return new MapPage(
           auth: widget.auth,
           onSignedOut: _signedOut,
         );
