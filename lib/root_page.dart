@@ -47,6 +47,7 @@ class _RootPageState extends State<RootPage> {
   Widget build(BuildContext context) {
     switch (authStatus) {
       case AuthStatus.notSignedIn:
+        print("not signed in");
         return new LoginPage(
           auth: widget.auth,
           onSignedIn: _signedIn,

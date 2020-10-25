@@ -1,8 +1,13 @@
+import 'package:firebase_core/firebase_core.dart';
 import 'package:flutter/material.dart';
 import 'root_page.dart';
 import 'auth.dart';
 
-void main() => runApp(MyApp());
+void main() async {
+  WidgetsFlutterBinding.ensureInitialized();
+  await Firebase.initializeApp();
+  runApp(MyApp());
+}
 
 class MyApp extends StatelessWidget {
   // This widget is the root of your application.
@@ -21,8 +26,8 @@ class MyApp extends StatelessWidget {
             fontFamily: 'Helvetica',
 
             textTheme: TextTheme(
-                headline: TextStyle(fontSize: 60.0, fontWeight: FontWeight.bold),
-                title: TextStyle(fontSize: 30.0),
+                headline5: TextStyle(fontSize: 60.0, fontWeight: FontWeight.bold),
+                headline6: TextStyle(fontSize: 30.0),
                 button: TextStyle(
                     color: Colors.green, // This is not working.
                     fontSize: 15.0,
