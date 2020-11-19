@@ -2,13 +2,12 @@ import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:google_maps_flutter/google_maps_flutter.dart';
-import 'package:google_place/google_place.dart';
-import 'package:http/http.dart' as http;
-import 'package:auto_size_text/auto_size_text.dart';
-import 'auth.dart';
-import 'package:uuid/uuid.dart';
-import 'package:geocoder/geocoder.dart';
+import 'package:flutter_google_places/flutter_google_places.dart';
 import 'credentials.dart';
+import 'package:google_place/google_place.dart';
+import 'auth.dart';
+import 'package:geocoder/geocoder.dart';
+import 'create_poi_page.dart';
 import 'colors.dart';
 
 class MapPage extends StatefulWidget {
@@ -26,7 +25,6 @@ class MapPage extends StatefulWidget {
 class MapPageState extends State<MapPage> {
   Map<MarkerId, Marker> markers = <MarkerId, Marker>{};
   GoogleMapController mapController;
-  final Geolocator _geolocator = Geolocator();
   static LatLng _initialPosition;
   static LatLng _lastMapPosition = _initialPosition;
   String id;
@@ -34,6 +32,7 @@ class MapPageState extends State<MapPage> {
   final _formKey = GlobalKey<FormState>();
   String userID;
   String userEmail;
+  String desiredLocationGuess;
 
   @override
   void initState() {
@@ -58,9 +57,37 @@ class MapPageState extends State<MapPage> {
 
   void _getUserLocation() async {
     Position position = await Geolocator.getCurrentPosition(desiredAccuracy: LocationAccuracy.high);
+    final coordinates = new Coordinates(position.latitude, position.longitude);
+
+    // get business address
+    var addresses = await Geocoder.local.findAddressesFromCoordinates(coordinates);
+    String address = addresses.first.addressLine;
+
+    // get business name
+    var googlePlace = GooglePlace(PLACES_API_KEY);
+    var getTextSearch = await googlePlace.search.getTextSearch(address + "street_address");
+
     setState(() {
       _initialPosition = LatLng(position.latitude, position.longitude);
+      desiredLocationGuess = getTextSearch.results[0].name + ", " + addresses.first.addressLine;
     });
+
+    /*
+      Future<String> _getAddress(double latitude, double longitude) async {
+    final coordinates = new Coordinates(latitude, longitude);
+    // var addresses = await Geocoder.local.findAddressesFromCoordinates(coordinates);
+    //var first = addresses.first;
+    //return first.addressLine;
+    return null;
+  }
+
+  Future<String> _getName(String address, double latitude, double longitude) async {
+    //var googlePlace = GooglePlace(PLACES_API_KEY);
+    //var getTextSearch = await googlePlace.search.getTextSearch(address + "street_address");
+    //return getTextSearch.results[0].name;
+    return null;
+  }
+     */
   }
 
   _onCameraMove(CameraPosition position) {
@@ -175,6 +202,15 @@ class MapPageState extends State<MapPage> {
 
   }
 
+  _addMarker() {
+    setState(() {
+      Navigator.push(context, MaterialPageRoute(
+          builder: (context) => CreatePOIPage(desiredLocationGuess, userEmail, userID, widget.auth, widget.onSignedOut)),
+      );
+    });
+  }
+
+  /*
   _addMarker() async {
     var uuid = Uuid();
     var markerIdVal = uuid.v1();
@@ -208,8 +244,14 @@ class MapPageState extends State<MapPage> {
     setState(() {
       // adding a new marker to map
       markers[markerId] = marker;
+
+      Navigator.push(context, MaterialPageRoute(
+          builder: (context) => CreatePOIPage()),
+      );
     });
   }
+
+   */
 
   _deleteAllMarkers() {
     setState(() {
@@ -219,21 +261,23 @@ class MapPageState extends State<MapPage> {
 
   Future<String> _getAddress(double latitude, double longitude) async {
     final coordinates = new Coordinates(latitude, longitude);
-    var addresses = await Geocoder.local.findAddressesFromCoordinates(coordinates);
-    var first = addresses.first;
-    return first.addressLine;
+    // var addresses = await Geocoder.local.findAddressesFromCoordinates(coordinates);
+    //var first = addresses.first;
+    //return first.addressLine;
+    return null;
   }
 
   Future<String> _getName(String address, double latitude, double longitude) async {
-    var googlePlace = GooglePlace(PLACES_API_KEY);
-    var getTextSearch = await googlePlace.search.getTextSearch(address + "street_address");
-    return getTextSearch.results[0].name;
+    //var googlePlace = GooglePlace(PLACES_API_KEY);
+    //var getTextSearch = await googlePlace.search.getTextSearch(address + "street_address");
+    //return getTextSearch.results[0].name;
+    return null;
   }
 
   _onMarkerTapped(String name, String address, double latitude, double longitude) async {
     print("latitude: " + latitude.toString());
     print("longitude: " + longitude.toString());
     print("name: " + name);
-    print("name: " + address);
+    print("address: " + address);
   }
 }
