@@ -69,7 +69,14 @@ class MapPageState extends State<MapPage> {
 
     setState(() {
       _initialPosition = LatLng(position.latitude, position.longitude);
-      desiredLocationGuess = getTextSearch.results[0].name + ", " + addresses.first.addressLine;
+      // don't repeat address
+      if (addresses.first.addressLine.contains(getTextSearch.results[0].name)) {
+        print("contains");
+        desiredLocationGuess = addresses.first.addressLine;
+      } else {
+        print("doesn't contain");
+        desiredLocationGuess = getTextSearch.results[0].name + ", " + addresses.first.addressLine;
+      }
     });
 
     /*
