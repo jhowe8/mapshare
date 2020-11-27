@@ -32,7 +32,6 @@ class MapPageState extends State<MapPage> {
   final _formKey = GlobalKey<FormState>();
   String userID;
   String userEmail;
-  String desiredLocationGuess;
 
   @override
   void initState() {
@@ -69,25 +68,7 @@ class MapPageState extends State<MapPage> {
 
     setState(() {
       _initialPosition = LatLng(position.latitude, position.longitude);
-      desiredLocationGuess = getTextSearch.results[0].name + ", " + addresses.first.addressLine;
     });
-
-    /*
-      Future<String> _getAddress(double latitude, double longitude) async {
-    final coordinates = new Coordinates(latitude, longitude);
-    // var addresses = await Geocoder.local.findAddressesFromCoordinates(coordinates);
-    //var first = addresses.first;
-    //return first.addressLine;
-    return null;
-  }
-
-  Future<String> _getName(String address, double latitude, double longitude) async {
-    //var googlePlace = GooglePlace(PLACES_API_KEY);
-    //var getTextSearch = await googlePlace.search.getTextSearch(address + "street_address");
-    //return getTextSearch.results[0].name;
-    return null;
-  }
-     */
   }
 
   _onCameraMove(CameraPosition position) {
@@ -205,7 +186,7 @@ class MapPageState extends State<MapPage> {
   _addMarker() {
     setState(() {
       Navigator.push(context, MaterialPageRoute(
-          builder: (context) => CreatePOIPage(desiredLocationGuess, userEmail, userID, widget.auth, widget.onSignedOut)),
+          builder: (context) => CreatePOIPage(_initialPosition, userEmail, userID, widget.auth, widget.onSignedOut)),
       );
     });
   }

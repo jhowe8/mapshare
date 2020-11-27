@@ -2,11 +2,13 @@ class POI {
   String name;
   String address;
   String description;
-  double latitutude;
+  double latitude;
   double longitude;
+  double rating;
+
 
   POI(
       this.name,
       this.address,
-      );
+  );
 }
