@@ -1,12 +1,20 @@
+import 'dart:async';
+
+import 'package:firebase_storage/firebase_storage.dart';
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:geocoder/geocoder.dart';
+import 'package:geoflutterfire/geoflutterfire.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:google_maps_flutter/google_maps_flutter.dart';
 import 'package:flutter_google_places/flutter_google_places.dart';
+import 'package:mapshare/POI.dart';
+import 'package:rxdart/rxdart.dart';
+import 'package:uuid/uuid.dart';
 import 'credentials.dart';
 import 'package:google_place/google_place.dart';
 import 'auth.dart';
-import 'package:geocoder/geocoder.dart';
+import 'package:geocoder/geocoder.dart' as gc;
 import 'create_poi_page.dart';
 import 'colors.dart';
 
@@ -23,40 +31,33 @@ class MapPage extends StatefulWidget {
 }
 
 class MapPageState extends State<MapPage> {
-  Map<MarkerId, Marker> markers = <MarkerId, Marker>{};
+  final FirebaseFirestore _db = FirebaseFirestore.instance;
+  Set<Marker> markers = new Set<Marker>();
   GoogleMapController mapController;
   static LatLng _initialPosition;
   static LatLng _lastMapPosition = _initialPosition;
   String id;
-  final db = FirebaseFirestore.instance;
   final _formKey = GlobalKey<FormState>();
   String userID;
   String userEmail;
+  BehaviorSubject<double> radius = BehaviorSubject<double>.seeded(100.0);
+  Stream<dynamic> query;
+  StreamSubscription subscription;
+  // StreamBuilder<QuerySnapshot> streamBuilder = new StreamBuilder(
+  //   stream: markerStream,
+  //   builder: null,
+  // );
 
   @override
   void initState() {
     super.initState();
-    // check status of current user when app is turned on
-    widget.auth.currentUser().then((_userID) {
-      setState(() {
-        userID = _userID;
-      });
-    });
-    widget.auth.currentUserEmail().then((_userEmail) {
-      setState(() {
-        userEmail = _userEmail;
-        // add user to database if necessary
-        var data = {'user': userEmail};
-        CollectionReference ref = db.collection('users');
-        ref.doc(userID).set(data);
-      });
-    });
+    _signInAndGetMarkers();
     _getUserLocation();
   }
 
   void _getUserLocation() async {
     Position position = await Geolocator.getCurrentPosition(desiredAccuracy: LocationAccuracy.high);
-    final coordinates = new Coordinates(position.latitude, position.longitude);
+    final coordinates = new gc.Coordinates(position.latitude, position.longitude);
 
     // get business address
     var addresses = await Geocoder.local.findAddressesFromCoordinates(coordinates);
@@ -78,14 +79,16 @@ class MapPageState extends State<MapPage> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
+      backgroundColor: LIGHT_LIGHT_COLOR,
       appBar: AppBar(
+        automaticallyImplyLeading: false,
         title: Text("Your Map"),
       ),
       body: Column(
         children: <Widget>[
           Expanded(
-            child: _initialPosition == null ? Container(child: Center(child:Text('loading map..', style: TextStyle(fontFamily: 'Avenir-Medium', color: LIGHT_CYAN),),),) : Container(
-              decoration: const BoxDecoration(color: BURNT_SIENNA),
+            child: _initialPosition == null ? Container(child: Center(child:Text('loading map..', style: TextStyle(fontFamily: 'Avenir-Medium', color: LIGHT_LIGHT_COLOR),),),) : Container(
+              decoration: const BoxDecoration(color: DARK_COLOR),
               child: GoogleMap(
                 initialCameraPosition: CameraPosition(
                   target: _initialPosition,
@@ -95,7 +98,7 @@ class MapPageState extends State<MapPage> {
                 myLocationEnabled: true,
                 mapType: MapType.hybrid,
                 compassEnabled: true,
-                markers: Set<Marker>.of(markers.values),
+                markers: markers,
                 onCameraMove: _onCameraMove,
               )
             ),
@@ -103,24 +106,24 @@ class MapPageState extends State<MapPage> {
           ),
           Expanded(
             child: Container(
-              decoration: const BoxDecoration(color: GUNMETAL),
+              decoration: const BoxDecoration(color: DARK_COLOR),
               child: Column(
                 children: <Widget>[
                   Row(
                     children: <Widget>[
                       FlatButton(
-                      child: Icon(Icons.pin_drop, color: Colors.white),
-                      color: PALE_CERULEAN,
-                      onPressed: _addMarker
+                        child: Icon(Icons.pin_drop, color: HIGHLIGHT_COLOR),
+                        color: MEDIUM_LIGHT_COLOR,
+                        onPressed: _addMarker
                       )
                     ]
                   ),
                   Row(
                     children: <Widget>[
                       FlatButton(
-                      child: Icon(Icons.delete_outline, color: Colors.white),
-                      color: BURNT_SIENNA,
-                      onPressed: _deleteAllMarkers
+                        child: Icon(Icons.delete_outline, color: LIGHT_LIGHT_COLOR),
+                        color: HIGHLIGHT_COLOR,
+                        onPressed: _deleteAllMarkers
                       )
                     ]
                   )
@@ -133,7 +136,7 @@ class MapPageState extends State<MapPage> {
       ),
       bottomNavigationBar: BottomAppBar(
           child: Container(
-              color: BDAZZLED_BLUE,
+              color: MEDIUM_LIGHT_COLOR,
               height: 60,
               child: Column(
                   children: <Widget>[
@@ -178,9 +181,43 @@ class MapPageState extends State<MapPage> {
     }
   }
 
+  void _updateMarkers(List<DocumentSnapshot> documentList) {
+    print(documentList);
+    setState(() {
+      markers = new Set<Marker>();
+    });
+    documentList.forEach((DocumentSnapshot document) {
+      LatLng latLng = new LatLng(document.data()['latitude'], document.data()['longitude']);
+      double distance = document.data()['distance'];
+      markers.add(Marker(
+        markerId: new MarkerId(new Uuid().toString()),
+        position: latLng,
+        icon: BitmapDescriptor.defaultMarker,
+        infoWindow: InfoWindow(
+          title: 'title',
+          snippet: 'snippet'
+        )
+      ));
+    });
+  }
+
+  _startQuery() async {
+    FirebaseStorage storage = FirebaseStorage.instance;
+    var ref = _db.collection('POI');
+
+    subscription = radius.switchMap((rad) {
+      return Geoflutterfire().collection(collectionRef: ref).within(
+        center: new GeoFirePoint(_initialPosition.latitude, _initialPosition.longitude),
+        radius: rad,
+        field: 'geopoint',
+        strictMode: true
+      );
+    }).listen(_updateMarkers);
+  }
+
   // use this to get the markers from database for user
   _onMapCreated(GoogleMapController controller) async {
-
+    print("Map Created");
   }
 
   _addMarker() {
@@ -191,28 +228,33 @@ class MapPageState extends State<MapPage> {
     });
   }
 
-  /*
-  _addMarker() async {
+  _signInAndGetMarkers() async {
+    // check status of current user when app is turned on
+    await widget.auth.currentUser().then((_userID) {
+      setState(() {
+        userID = _userID;
+      });
+    });
+    widget.auth.currentUserEmail().then((_userEmail) {
+      setState(() {
+        userEmail = _userEmail;
+        // add user to database if necessary
+        var data = {'user': userEmail};
+        CollectionReference ref = _db.collection('users');
+        ref.doc(userID).set(data);
+      });
+    });
+
     var uuid = Uuid();
     var markerIdVal = uuid.v1();
     final MarkerId markerId = MarkerId(markerIdVal);
-    String address;
-    String name;
 
-    Position position = await Geolocator.getCurrentPosition(desiredAccuracy: LocationAccuracy.high);
-    await _getAddress(position.latitude, position.longitude).then((String title) {
-      setState(() {
-        address = title;
-      });
-    });
+    Query query = FirebaseFirestore.instance.collection('users').doc(userID).collection('POI');
 
-    await _getName(address, position.latitude, position.longitude).then((String placename) {
-      setState(() {
-        name = placename;
-      });
-    });
-
+    var uuid2 = Uuid();
+    print(userID);
     // creating a new MARKER
+    /*
     final Marker marker = Marker(
       markerId: markerId,
       position: LatLng(position.latitude, position.longitude),
@@ -222,26 +264,32 @@ class MapPageState extends State<MapPage> {
       },
     );
 
-    setState(() {
-      // adding a new marker to map
-      markers[markerId] = marker;
+     */
+  }
 
-      Navigator.push(context, MaterialPageRoute(
-          builder: (context) => CreatePOIPage()),
-      );
+  void markerStream() {
+    _db.collection('user').doc(userID).collection('POI').get().then((docs) {
+      if (docs.docs.isNotEmpty) {
+        for(int i = 0; i < docs.docs.length; i++) {
+          _initMarker(docs.docs[i].data(), docs.docs[i].id);
+        }
+      }
     });
   }
 
-   */
+  void _initMarker(chargePoint, documentId) {
+    var markerIdVal = documentId;
+    final MarkerId markerId = MarkerId(markerIdVal);
+  }
 
   _deleteAllMarkers() {
     setState(() {
-      markers = <MarkerId, Marker>{};
+      markers = new Set<Marker>();
     });
   }
 
   Future<String> _getAddress(double latitude, double longitude) async {
-    final coordinates = new Coordinates(latitude, longitude);
+    final coordinates = new gc.Coordinates(latitude, longitude);
     // var addresses = await Geocoder.local.findAddressesFromCoordinates(coordinates);
     //var first = addresses.first;
     //return first.addressLine;

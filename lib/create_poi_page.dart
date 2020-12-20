@@ -1,22 +1,26 @@
 import 'dart:io';
-
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:flutter/scheduler.dart';
 import 'package:flutter/services.dart';
 import 'package:google_maps_flutter/google_maps_flutter.dart';
-import 'package:google_place/google_place.dart';
 import 'package:auto_size_text/auto_size_text.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:mapshare/POI.dart';
 import 'package:mapshare/colors.dart';
+import 'package:mapshare/database/DatabaseService.dart';
 import 'auth.dart';
 import 'package:uuid/uuid.dart';
 import 'package:geocoding/geocoding.dart' as geocoding;
 import 'credentials.dart';
 import 'package:dio/dio.dart';
 import 'dart:async';
+import 'map_page.dart';
 import 'widgets/divider_with_text.dart';
 import 'package:smooth_star_rating/smooth_star_rating.dart';
+import 'package:toggle_switch/toggle_switch.dart';
+import 'package:font_awesome_flutter/font_awesome_flutter.dart';
+import 'package:firebase_storage/firebase_storage.dart';
 
 class CreatePOIPage extends StatefulWidget {
   final LatLng currentUserPosition;
@@ -34,31 +38,37 @@ class CreatePOIPage extends StatefulWidget {
 }
 
 class CreatePOIPageState extends State<CreatePOIPage> {
-  TextEditingController _searchController = new TextEditingController();
-  final db = FirebaseFirestore.instance;
-  final _formKey = GlobalKey<FormState>();
-  String _address;
+  final FirebaseFirestore _db = FirebaseFirestore.instance;
+
+  // the point of this page - populate this object
+  POI pointOfInterest = new POI();
+
   String _heading;
   var uuid = new Uuid();
   String _sessionToken;
   List<String> _placesList;
   final picker = ImagePicker();
-  String selectedEntry;
-  double _mapHeight = 250;
-  double _buttonSpace = 60;
-  int _mapVisionSpeed = 500;
-  String toggleMapButtonText = "Hide Map";
+  // pick location from map
   LatLng _mapPosition;
   Completer<GoogleMapController> _controller = Completer();
-  String comments;
+  // Location selected from search
+  TextEditingController _searchController = new TextEditingController();
+  // strange bug occurs when hitting cancel button on search bar. lastSearchText
+  // stops the search from searching for the searchText when the cancel button is hit.
+  String lastSearchText;
+  String selectedEntry;
+  Set<Marker> markers = new Set<Marker>();
+  // for hiding map and opening map back up
+  double _mapHeight = 250;
+  double _buttonSpace = 60;
+  // controls the animation speed for map hiding
+  int _mapVisionSpeed = 500;
+  String toggleMapButtonText = "Hide Map";
+  // category selection
+  int initialCategoryIndex= 1;
+  var indexToCategory = { 0: 'Sightseeing', 1: 'Food', 2: 'Nightlife', 3: 'Shopping' };
+  // comments
   final _commentsController = TextEditingController();
-
-  Map<num, File> indexToImage = <num, File>{
-    0: null,
-    1: null,
-    2: null,
-    3: null
-  };
 
   @override
   void initState() {
@@ -74,27 +84,39 @@ class CreatePOIPageState extends State<CreatePOIPage> {
   void dispose() {
     _searchController.removeListener(_onSearchChanged);
     _searchController.dispose();
+    _commentsController.removeListener(_updateComment);
     _commentsController.dispose();
     super.dispose();
   }
 
+  // create session tokens to limit cost
   _onSearchChanged() {
     if (_sessionToken == null) {
       setState(() {
         _sessionToken = uuid.v4();
       });
     }
-    getLocationResults(_searchController.text);
+    getLocationResults();
   }
 
-  void getLocationResults(String input) async {
-    if (input.isEmpty || input == selectedEntry) {
+  void getLocationResults() async {
+    if  (_searchController.text.isEmpty) {
+      lastSearchText = '';
+    }
+
+    if (_searchController.text.isEmpty || _searchController.text == selectedEntry || _searchController.text == lastSearchText) {
+      setState(() {
+        _heading = '';
+        _placesList = null;
+      });
       return;
     }
 
+    lastSearchText = _searchController.text;
     String baseURL = 'https://maps.googleapis.com/maps/api/place/autocomplete/json';
     String type = 'establishment';
-    String request = '$baseURL?input=$input&key=$PLACES_API_KEY&types=$type&sessiontoken=$_sessionToken';
+    String request = '$baseURL?input=${_searchController.text}&key=$PLACES_API_KEY&types=$type&sessiontoken=$_sessionToken';
+
     Response response = await Dio().get(request);
 
     print(request);
@@ -115,36 +137,68 @@ class CreatePOIPageState extends State<CreatePOIPage> {
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: AppBar(
-        title: Text('Create Trip - Location'),
-      ),
-      body: Center(
-        child: Column(
-          children: <Widget>[
-            Padding(
-              padding: const EdgeInsets.all(12.0),
-              child: TextField(
-                controller: _searchController,
-                decoration: InputDecoration(
-                  prefixIcon: Icon(Icons.place),
+    return Listener(
+      onPointerDown: (_) {
+        FocusScopeNode currentFocus = FocusScope.of(context);
+
+        if (!currentFocus.hasPrimaryFocus && currentFocus.focusedChild != null) {
+          currentFocus.unfocus();
+        }
+      },
+      child: Scaffold(
+        appBar: AppBar(
+          // leading: IconButton(
+          //   icon: Icon(Icons.arrow_back),
+          //   onPressed: () => setState(() {
+          //     Navigator.push(context, MaterialPageRoute(
+          //         builder: (context) => new MapPage(auth: widget.auth, onSignedOut: widget.onSignedOut)),
+          //     );
+          //   })
+          // ),
+          title: Text('Create Point of Interest'),
+        ),
+        body: Center(
+          child: Column(
+            children: <Widget>[
+              Padding(
+                padding: const EdgeInsets.all(12.0),
+                child: buildSearchTextField()
+              ),
+              Padding(
+                padding: const EdgeInsets.only(left: 10.0, right: 10.0),
+                child: _heading == null ? Container() : new DividerWithText(
+                  dividerText: _heading,
                 ),
               ),
-            ),
-            Padding(
-              padding: const EdgeInsets.only(left: 10.0, right: 10.0),
-              child: _heading == null ? Container() : new DividerWithText(
-                dividerText: _heading,
+              Expanded(
+                child: (_placesList == null || _placesList.length < 1) ? buildRatingPage(context) : ListView.builder(
+                  itemCount: _placesList.length,
+                  itemBuilder: (BuildContext context, int index) =>
+                      buildPlaceCard(context, index),
+                ),
               ),
-            ),
-            Expanded(
-              child: (_placesList == null || _placesList.length < 1) ? buildRatingPage(context) : ListView.builder(
-                itemCount: _placesList.length,
-                itemBuilder: (BuildContext context, int index) =>
-                    buildPlaceCard(context, index),
-              ),
-            ),
-          ],
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget buildSearchTextField() {
+    return ListTile(
+      title: TextField(
+        maxLines: 1,
+        controller: _searchController,
+        decoration: InputDecoration(
+          prefixIcon: Icon(Icons.place, color: HIGHLIGHT_COLOR),
+          suffixIcon: _searchController.text.isEmpty ? null : IconButton(
+            icon: Icon(Icons.cancel, color: HIGHLIGHT_COLOR),
+            onPressed: () {
+              _heading = '';
+              _searchController.text = '';
+              lastSearchText = '';
+            },
+          )
         ),
       ),
     );
@@ -220,27 +274,63 @@ class CreatePOIPageState extends State<CreatePOIPage> {
           ]
         ),
         SizedBox(height: 20),
+        // choose location category
+        Container(
+          padding: const EdgeInsets.all(11.0),
+          child: Column(
+            children: [
+              Text("Choose Category", style: TextStyle(color: LIGHT_LIGHT_COLOR)),
+              SizedBox(height: 25),
+              Center(
+                child: ToggleSwitch(
+                  minWidth: MediaQuery.of(context).size.width * 0.9,
+                  fontSize: 12.0,
+                  initialLabelIndex: initialCategoryIndex,
+                  cornerRadius: 25.0,
+                  activeFgColor: LIGHT_LIGHT_COLOR,
+                  inactiveBgColor: MEDIUM_LIGHT_COLOR,
+                  inactiveFgColor: LIGHT_LIGHT_COLOR,
+                  labels: ['Sightseeing', 'Food', 'Nightlife', 'Shopping'],
+                  icons: [FontAwesomeIcons.hiking, FontAwesomeIcons.utensils, FontAwesomeIcons.glassCheers, FontAwesomeIcons.shoppingBag],
+                  activeBgColors: [HIGHLIGHT_COLOR, HIGHLIGHT_COLOR, HIGHLIGHT_COLOR, HIGHLIGHT_COLOR],
+                  onToggle: (index) {
+                    print('switched to: $index');
+                    setState(() {
+                      initialCategoryIndex = index;
+                      pointOfInterest.category = indexToCategory[index];
+                    });
+                  },
+                ),
+              ),
+            ],
+          )
+        ),
         // star rating container
         Container(
           padding: const EdgeInsets.all(12.0),
           child: Column(
             children: [
-              Text("Rating", style: TextStyle(color: LIGHT_CYAN)),
+              Text("_____________________________", style: TextStyle(color: HIGHLIGHT_COLOR)),
+              SizedBox(height: 20),
+              Text("Rating", style: TextStyle(color: LIGHT_LIGHT_COLOR)),
               SizedBox(height: 25),
               SmoothStarRating(
-                color: BURNT_SIENNA,
-                borderColor: BURNT_SIENNA,
+                color: HIGHLIGHT_COLOR,
+                borderColor: HIGHLIGHT_COLOR,
                 rating: 5.0,
                 isReadOnly: false,
-                size: 30,
+                size: MediaQuery. of(context).size.width * 0.15,
                 filledIconData: Icons.star,
                 halfFilledIconData: Icons.star_half,
                 defaultIconData: Icons.star_border,
                 starCount: 5,
-                allowHalfRating: true,
+                allowHalfRating: false,
                 spacing: 2.0,
                 onRated: (value) {
                   print("rating value -> $value");
+                  setState(() {
+                    pointOfInterest.rating = value;
+                  });
                   }
               )
             ],
@@ -250,9 +340,9 @@ class CreatePOIPageState extends State<CreatePOIPage> {
           padding: const EdgeInsets.all(12.0),
           child: Column(
             children: [
-              Text("_____________________________", style: TextStyle(color: BURNT_SIENNA)),
+              Text("_____________________________", style: TextStyle(color: HIGHLIGHT_COLOR)),
               SizedBox(height: 20),
-              Text("Upload Images", style: TextStyle(color: LIGHT_CYAN)),
+              Text("Upload Images", style: TextStyle(color: LIGHT_LIGHT_COLOR)),
               SizedBox(height: 30),
               Row(
                 mainAxisAlignment: MainAxisAlignment.center,
@@ -278,9 +368,9 @@ class CreatePOIPageState extends State<CreatePOIPage> {
         Container(
           child: Column(
             children: [
-              Text("_____________________________", style: TextStyle(color: BURNT_SIENNA)),
+              Text("_____________________________", style: TextStyle(color: HIGHLIGHT_COLOR)),
               SizedBox(height: 20),
-              Text("Comments", style: TextStyle(color: LIGHT_CYAN)),
+              Text("Comments", style: TextStyle(color: LIGHT_LIGHT_COLOR)),
               SizedBox(height: 20),
               Container(
                 margin: EdgeInsets.all(8.0),
@@ -300,15 +390,32 @@ class CreatePOIPageState extends State<CreatePOIPage> {
             ]
           )
         ),
+        Center(
+          child: ElevatedButton.icon(
+            onPressed: () {
+              savePOI();
+            },
+            icon: Icon(Icons.pin_drop, color: DARK_LIGHT_COLOR),
+            style: ElevatedButton.styleFrom(
+              primary: MEDIUM_LIGHT_COLOR,
+              shadowColor: DARK_COLOR,
+              elevation: 3
+            ),
+            label: Text('Add Point', style: TextStyle(fontSize: 20, color: LIGHT_LIGHT_COLOR)),
+          ),
+        ),
         SizedBox(height: 30)
       ],
     );
   }
 
   _updateComment() {
-    comments = _commentsController.text;
+    pointOfInterest.comments = _commentsController.text;
   }
 
+  // best not to mess with this method - a dreadful bug may present itself
+  // wherein the selected place will be added to the search text, but then
+  // google maps will search for the text that was just selected.
   Future<void> clearPlaceSearchOnTap(int index) async {
     List<geocoding.Location> locations = await geocoding.locationFromAddress(_placesList[index]);
     setState(() {
@@ -323,19 +430,28 @@ class CreatePOIPageState extends State<CreatePOIPage> {
     FocusScope.of(context).requestFocus(new FocusNode());
     final GoogleMapController controller = await _controller.future;
     controller.animateCamera(CameraUpdate.newCameraPosition(new CameraPosition(target: _mapPosition)));
+
+    // add marker to map
+    setState(() {
+      markers.clear();
+      markers.add(Marker(
+        markerId: MarkerId('selected location'),
+        position: _mapPosition,
+      ));
+    });
   }
 
   Widget getHideableMap() {
     return AnimatedContainer(
       height: _mapHeight,
       decoration: BoxDecoration(
-        color: LIGHT_CYAN,
+        color: LIGHT_LIGHT_COLOR,
       ),
       duration: Duration(milliseconds: _mapVisionSpeed),
       curve: Curves.fastOutSlowIn,
       child:
-        _mapPosition == null ? Container(child: Center(child:Text('loading map..', style: TextStyle(fontFamily: 'Avenir-Medium', color: LIGHT_CYAN),),),) : Container(
-          decoration: const BoxDecoration(color: GUNMETAL),
+        _mapPosition == null ? Container(child: Center(child:Text('loading map..', style: TextStyle(fontFamily: 'Avenir-Medium', color: LIGHT_LIGHT_COLOR),),),) : Container(
+          decoration: const BoxDecoration(color: DARK_COLOR),
           child: GoogleMap(
             initialCameraPosition: CameraPosition(
                 target: _mapPosition,
@@ -347,6 +463,7 @@ class CreatePOIPageState extends State<CreatePOIPage> {
             onMapCreated: (GoogleMapController controller) {
               _controller.complete(controller);
             },
+            markers: markers
           )
         )
     );
@@ -355,13 +472,13 @@ class CreatePOIPageState extends State<CreatePOIPage> {
   Widget toggleMapVisibility() {
     return Container(
       decoration: BoxDecoration(
-          color: BDAZZLED_BLUE,
-          border: Border.all(color: Colors.blueAccent)
+          color: MEDIUM_LIGHT_COLOR,
+          border: Border.all(color: DARK_LIGHT_COLOR)
       ),
       height: 60,
       width: MediaQuery. of(context).size.width,
       child: TextButton(
-        child: Text(toggleMapButtonText, style: TextStyle(color: LIGHT_CYAN),),
+        child: Text(toggleMapButtonText, style: TextStyle(color: LIGHT_LIGHT_COLOR),),
         onPressed: () {
           if (toggleMapButtonText == "Hide Map") {
             setState(() {
@@ -392,11 +509,11 @@ class CreatePOIPageState extends State<CreatePOIPage> {
           constraints: BoxConstraints.expand(),
           child: Container(
             padding: EdgeInsets.all(0.0),
-            child: indexToImage[index] == null ? noImageSelected(index)
+            child: pointOfInterest.images[index] == null ? noImageSelected(index)
                       : Stack(
                           children: [
                             Positioned.fill(
-                              child: Image.file(indexToImage[index]),
+                              child: Image.file(pointOfInterest.images[index]),
                             ),
                             Positioned(
                               right: 0,
@@ -405,7 +522,7 @@ class CreatePOIPageState extends State<CreatePOIPage> {
                                 child: Center(
                                   child: Ink(
                                     decoration: const ShapeDecoration(
-                                      color: LIGHT_CYAN,
+                                      color: LIGHT_LIGHT_COLOR,
                                       shape: CircleBorder(),
                                     ),
                                     child: SizedBox(
@@ -414,10 +531,10 @@ class CreatePOIPageState extends State<CreatePOIPage> {
                                       child: IconButton(
                                         padding: new EdgeInsets.all(0.0),
                                         icon: Icon(Icons.cancel),
-                                        color: BURNT_SIENNA,
+                                        color: HIGHLIGHT_COLOR,
                                         onPressed: () {
                                           setState(() {
-                                            indexToImage[index] = null;
+                                            pointOfInterest.images[index] = null;
                                           });
                                         },
                                       ),
@@ -434,7 +551,7 @@ class CreatePOIPageState extends State<CreatePOIPage> {
       padding: const EdgeInsets.all(12.0),
       decoration: BoxDecoration(
         border: Border.all(
-            color: LIGHT_CYAN
+            color: LIGHT_LIGHT_COLOR
         ),
       ),
     );
@@ -445,7 +562,7 @@ class CreatePOIPageState extends State<CreatePOIPage> {
       child: Column(
         mainAxisAlignment: MainAxisAlignment.spaceBetween,
         children: [
-          Text("No image selected.", style: TextStyle(color: LIGHT_CYAN),),
+          Text("No image selected.", style: TextStyle(color: LIGHT_LIGHT_COLOR),),
           Row(
             mainAxisAlignment: MainAxisAlignment.spaceEvenly,
             children: [
@@ -454,12 +571,12 @@ class CreatePOIPageState extends State<CreatePOIPage> {
                 child: Center(
                   child: Ink(
                     decoration: const ShapeDecoration(
-                      color: BDAZZLED_BLUE,
+                      color: MEDIUM_LIGHT_COLOR,
                       shape: CircleBorder(),
                     ),
                     child: IconButton(
                       icon: Icon(Icons.camera_alt_outlined),
-                      color: LIGHT_CYAN,
+                      color: LIGHT_LIGHT_COLOR,
                       onPressed: () => getImage(index, ImageSource.camera)
                     ),
                   ),
@@ -470,12 +587,12 @@ class CreatePOIPageState extends State<CreatePOIPage> {
                 child: Center(
                   child: Ink(
                     decoration: const ShapeDecoration(
-                      color: BDAZZLED_BLUE,
+                      color: MEDIUM_LIGHT_COLOR,
                       shape: CircleBorder(),
                     ),
                     child: IconButton(
                         icon: Icon(Icons.folder),
-                        color: LIGHT_CYAN,
+                        color: LIGHT_LIGHT_COLOR,
                         onPressed: () => getImage(index, ImageSource.gallery)
                     ),
                   ),
@@ -490,13 +607,93 @@ class CreatePOIPageState extends State<CreatePOIPage> {
 
   Future getImage(index, ImageSource imageSource) async {
     final pickedFile = await picker.getImage(source: imageSource);
-
+    print(pickedFile.path);
     setState(() {
       if (pickedFile != null) {
-        indexToImage[index] = File(pickedFile.path);
+        pointOfInterest.images[index] = File(pickedFile.path);
       } else {
         print('No image selected.');
       }
     });
+  }
+
+  // validate the POI and save to firebase
+  // For NoSql Firebase: username - category - ( address, LatLng, rating, images, comments )
+  void savePOI() async {
+    pointOfInterest.address = selectedEntry;
+    pointOfInterest.latitude = _mapPosition.latitude;
+    pointOfInterest.longitude = _mapPosition.longitude;
+
+    var poiValidated = POI.validatePOI(pointOfInterest);
+
+    if (poiValidated[0]) {
+      print("success! POI valid");
+    } else {
+      print(poiValidated[1]);
+    }
+
+    List<String> imageUrls = new List<String>();
+    int imageInd = 0;
+    for (int i = 0; i < pointOfInterest.images.length; i++) {
+      if (pointOfInterest.images[i] != null) {
+        imageUrls.add(_getImagePath(imageInd));
+        imageInd += 1;
+      }
+    }
+
+    await _db
+        .collection('users')
+        .doc(widget.userID)
+        .collection('POI')
+        .doc(pointOfInterest.address)
+        .set(
+        {
+          'address': pointOfInterest.address,
+          'latitude': pointOfInterest.latitude,
+          'longitude': pointOfInterest.longitude,
+          'rating': pointOfInterest.rating,
+          'images': imageUrls,
+          'comments': pointOfInterest.comments
+        });
+
+    String imagePath = 'users/${widget.userID}/POI/';
+    await saveImages(pointOfInterest.images, imagePath);
+
+    // Stream<POI> _pois = (() async* {
+    //   await Future<void>.delayed(Duration(seconds: 1));
+    //   yield 1;
+    //   await Future<void>.delayed(Duration(seconds: 1));
+    // })();
+  }
+
+  Future<void> saveImages(List<File> _images, String imagePath) async {
+    int imageInd = 0;
+    _images.forEach((image) async {
+      if (image != null) {
+        await uploadFile(image, imageInd++);
+      }
+    });
+  }
+
+  Future<void> uploadFile(File _image, int imageInd) async {
+    FirebaseStorage storage = FirebaseStorage.instance;
+    Reference ref = storage
+        .ref()
+        .child(_getImagePath(imageInd));
+    UploadTask uploadTask = ref.putFile(_image);
+    uploadTask.then((res) async {
+      await res.ref.getDownloadURL();
+    });
+  }
+
+  String _getImagePath(int imageInd) {
+    String imagePath = '';
+    imagePath += widget.userID;
+    imagePath += '/POI/';
+    imagePath += pointOfInterest.address;
+    imagePath += '/';
+    imagePath += 'image';
+    imagePath += imageInd.toString();
+    return imagePath;
   }
 }
