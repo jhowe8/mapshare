@@ -126,6 +126,15 @@ class MapPageState extends State<MapPage> {
                         onPressed: _deleteAllMarkers
                       )
                     ]
+                  ),
+                  Row(
+                      children: <Widget>[
+                        FlatButton(
+                            child: Icon(Icons.refresh_outlined, color: HIGHLIGHT_COLOR),
+                            color: DARK_LIGHT_COLOR,
+                            onPressed: _refreshMarkers
+                        )
+                      ]
                   )
                 ]
               )
@@ -199,6 +208,10 @@ class MapPageState extends State<MapPage> {
         )
       ));
     });
+  }
+
+  _refreshMarkers() async {
+    
   }
 
   _startQuery() async {

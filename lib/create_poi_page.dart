@@ -43,20 +43,17 @@ class CreatePOIPageState extends State<CreatePOIPage> {
   // the point of this page - populate this object
   POI pointOfInterest = new POI();
 
-  String _heading;
+  String _heading = "";
   var uuid = new Uuid();
   String _sessionToken;
-  List<String> _placesList;
+  List<String> _placesList = new List<String>();
   final picker = ImagePicker();
   // pick location from map
   LatLng _mapPosition;
   Completer<GoogleMapController> _controller = Completer();
   // Location selected from search
   TextEditingController _searchController = new TextEditingController();
-  // strange bug occurs when hitting cancel button on search bar. lastSearchText
-  // stops the search from searching for the searchText when the cancel button is hit.
-  String lastSearchText;
-  String selectedEntry;
+  final FocusNode searchFocus = FocusNode();
   Set<Marker> markers = new Set<Marker>();
   // for hiding map and opening map back up
   double _mapHeight = 250;
@@ -73,8 +70,9 @@ class CreatePOIPageState extends State<CreatePOIPage> {
   @override
   void initState() {
     super.initState();
-    _heading = "";
-    _placesList = null;
+    searchFocus.addListener(() {
+      print("has focus: ${searchFocus.hasFocus}");
+    });
     _searchController.addListener(_onSearchChanged);
     _commentsController.addListener(_updateComment);
     _mapPosition = widget.currentUserPosition;
@@ -86,6 +84,7 @@ class CreatePOIPageState extends State<CreatePOIPage> {
     _searchController.dispose();
     _commentsController.removeListener(_updateComment);
     _commentsController.dispose();
+    searchFocus.dispose();
     super.dispose();
   }
 
@@ -100,19 +99,9 @@ class CreatePOIPageState extends State<CreatePOIPage> {
   }
 
   void getLocationResults() async {
-    if  (_searchController.text.isEmpty) {
-      lastSearchText = '';
-    }
-
-    if (_searchController.text.isEmpty || _searchController.text == selectedEntry || _searchController.text == lastSearchText) {
-      setState(() {
-        _heading = '';
-        _placesList = null;
-      });
+    if (!searchFocus.hasFocus || _searchController.text.isEmpty) {
       return;
     }
-
-    lastSearchText = _searchController.text;
     String baseURL = 'https://maps.googleapis.com/maps/api/place/autocomplete/json';
     String type = 'establishment';
     String request = '$baseURL?input=${_searchController.text}&key=$PLACES_API_KEY&types=$type&sessiontoken=$_sessionToken';
@@ -187,6 +176,7 @@ class CreatePOIPageState extends State<CreatePOIPage> {
   Widget buildSearchTextField() {
     return ListTile(
       title: TextField(
+        focusNode: searchFocus,
         maxLines: 1,
         controller: _searchController,
         decoration: InputDecoration(
@@ -194,9 +184,12 @@ class CreatePOIPageState extends State<CreatePOIPage> {
           suffixIcon: _searchController.text.isEmpty ? null : IconButton(
             icon: Icon(Icons.cancel, color: HIGHLIGHT_COLOR),
             onPressed: () {
-              _heading = '';
-              _searchController.text = '';
-              lastSearchText = '';
+              setState(() {
+                _heading = '';
+              });
+              _searchController.clear();
+              _placesList.clear();
+              markers.clear();
             },
           )
         ),
@@ -238,10 +231,26 @@ class CreatePOIPageState extends State<CreatePOIPage> {
                   ),
                 ],
               ),
-              onTap: () {
-                clearPlaceSearchOnTap(index);
+              onTap: () async {
+                List<geocoding.Location> locations = await geocoding.locationFromAddress(_placesList[index]);
                 setState(() {
+                  _mapPosition = new LatLng(locations[0].latitude, locations[0].longitude);
                   _sessionToken = null;
+                  _searchController.text = _placesList[index];
+                  _placesList = new List<String>();
+                  _heading = '';
+                });
+
+                final GoogleMapController controller = await _controller.future;
+                controller.animateCamera(CameraUpdate.newCameraPosition(new CameraPosition(target: _mapPosition)));
+
+                // add marker to map
+                setState(() {
+                  markers.clear();
+                  markers.add(Marker(
+                    markerId: MarkerId('selected location'),
+                    position: _mapPosition,
+                  ));
                 });
               },
             ),
@@ -411,34 +420,6 @@ class CreatePOIPageState extends State<CreatePOIPage> {
 
   _updateComment() {
     pointOfInterest.comments = _commentsController.text;
-  }
-
-  // best not to mess with this method - a dreadful bug may present itself
-  // wherein the selected place will be added to the search text, but then
-  // google maps will search for the text that was just selected.
-  Future<void> clearPlaceSearchOnTap(int index) async {
-    List<geocoding.Location> locations = await geocoding.locationFromAddress(_placesList[index]);
-    setState(() {
-      _mapPosition = null;
-      selectedEntry = _placesList[index];
-      _searchController.text = _placesList[index];
-      _heading = null;
-      _mapPosition = new LatLng(locations[0].latitude, locations[0].longitude);
-      _placesList = null;
-    });
-
-    FocusScope.of(context).requestFocus(new FocusNode());
-    final GoogleMapController controller = await _controller.future;
-    controller.animateCamera(CameraUpdate.newCameraPosition(new CameraPosition(target: _mapPosition)));
-
-    // add marker to map
-    setState(() {
-      markers.clear();
-      markers.add(Marker(
-        markerId: MarkerId('selected location'),
-        position: _mapPosition,
-      ));
-    });
   }
 
   Widget getHideableMap() {
@@ -620,7 +601,7 @@ class CreatePOIPageState extends State<CreatePOIPage> {
   // validate the POI and save to firebase
   // For NoSql Firebase: username - category - ( address, LatLng, rating, images, comments )
   void savePOI() async {
-    pointOfInterest.address = selectedEntry;
+    pointOfInterest.address = _searchController.text;
     pointOfInterest.latitude = _mapPosition.latitude;
     pointOfInterest.longitude = _mapPosition.longitude;
 
@@ -629,6 +610,10 @@ class CreatePOIPageState extends State<CreatePOIPage> {
     if (poiValidated[0]) {
       print("success! POI valid");
     } else {
+      showDialog(
+        context: context,
+        builder: (BuildContext context) => popupError(context, poiValidated[1])
+      );
       print(poiValidated[1]);
     }
 
@@ -658,6 +643,8 @@ class CreatePOIPageState extends State<CreatePOIPage> {
 
     String imagePath = 'users/${widget.userID}/POI/';
     await saveImages(pointOfInterest.images, imagePath);
+    // assume POI loaded - add it to markers in the map page
+    //Navigator.pop(context, pointOfInterest);
 
     // Stream<POI> _pois = (() async* {
     //   await Future<void>.delayed(Duration(seconds: 1));
@@ -695,5 +682,28 @@ class CreatePOIPageState extends State<CreatePOIPage> {
     imagePath += 'image';
     imagePath += imageInd.toString();
     return imagePath;
+  }
+
+  Widget popupError(BuildContext context, String error) {
+    return new AlertDialog(
+      title: const Text('Error', style: TextStyle(color: HIGHLIGHT_COLOR)),
+      content: new Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: <Widget>[
+          Text(error, style: TextStyle(color: LIGHT_LIGHT_COLOR)),
+        ],
+      ),
+      actions: <Widget>[
+        new FlatButton(
+          onPressed: () {
+            Navigator.of(context).pop();
+          },
+          textColor: DARK_LIGHT_COLOR,
+          color: MEDIUM_LIGHT_COLOR,
+          child: const Text('Close'),
+        ),
+      ],
+    );
   }
 }
